@@ -16,14 +16,15 @@ def download_from_drive(file_id, output):
         url = f"https://drive.google.com/uc?export=download&id={file_id}"
         gdown.download(url, output, quiet=False)
 
+with st.spinner("Downloading model files (first run only)..."):
+    download_from_drive("1kFkoX7hPQC9TvZWLprIQHFwJ4e8CcBqy", "meta_742044.parquet")
+    download_from_drive("1PBUuC8N1XvaPnX8x9dbXy4iT_tNBSA1", "sampled_10001_742044.csv")
+    download_from_drive("1yXZ0PeLB9dao-9bsmMSRUNnRc2sHfL7", "svd_model_742044.pkl")
+    download_from_drive("11hbrXLMYv8U4yH_-U7QKXwprU_00hjEy", "tfidf_vectorizer_742044.pkl")
+    download_from_drive("1YZFmBBFCc3AxKsOpM5ECOC4tBT9GIRMY", "tfidf_matrix_742044.npz")
+    download_from_drive("1a506s41J0qenzTSOHg5LVSS0XnL-Fpq", "embeddings_742044.npy")
+    download_from_drive("17orGU6B1SMocR2y_Z_b_PKFK7Q_T5yfu", "faiss_index_742044.index")
 
-download_from_drive("1kFkoX7hPQC9TvZWLprIQHFwJ4e8CcBqy", "meta_742044.parquet")
-download_from_drive("1PBUuC8N1XvaPnX8x9dbXy4iT_tNBSA1", "sampled_10001_742044.csv")
-download_from_drive("1yXZ0PeLB9dao-9bsmMSRUNnRc2sHfL7", "svd_model_742044.pkl")
-download_from_drive("11hbrXLMYv8U4yH_-U7QKXwprU_00hjEy", "tfidf_vectorizer_742044.pkl")
-download_from_drive("1YZFmBBFCc3AxKsOpM5ECOC4tBT9GIRMY", "tfidf_matrix_742044.npz")
-download_from_drive("1a506s41J0qenzTSOHg5LVSS0XnL-Fpq", "embeddings_742044.npy")
-download_from_drive("17orGU6B1SMocR2y_Z_b_PKFK7Q_T5yfu", "faiss_index_742044.index")
 
 # =============================
 # CONFIG
@@ -189,7 +190,11 @@ st.subheader("Recommended Movies")
 
 rows = []
 for mid, score in recs:
-    r = meta[meta["movie_id"] == mid].iloc[0].to_dict()
+    row_df = meta[meta["movie_id"] == mid]
+if row_df.empty:
+    continue
+r = row_df.iloc[0].to_dict()
+
     r["score"] = score
     rows.append(r)
 
