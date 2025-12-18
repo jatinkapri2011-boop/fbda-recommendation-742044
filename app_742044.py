@@ -14,7 +14,7 @@ import os
 def download_from_drive(file_id, output):
     if not os.path.exists(output):
         url = f"https://drive.google.com/uc?id={file_id}"
-        gdown.download(url, output, quiet=False)
+        gdown.download(url, output, quiet=False, fuzzy=True)
 
 download_from_drive("1kFkoX7hPQC9TvZWLprIQHFwJ4e8CcBqy", "meta_742044.parquet")
 download_from_drive("1PBUuC8N1XvaPnX8x9dbXy4iT_tNBSA1", "sampled_10001_742044.csv")
