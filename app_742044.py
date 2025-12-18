@@ -62,11 +62,18 @@ def parse_actors(s):
     return [a.strip() for a in re.split("[,|]", str(s)) if a.strip()]
 
 df["actors"] = df["stars"].apply(parse_actors)
-df["movie_id"] = df["title"].astype(str).str.strip() + " (" + df["year"].fillna("NA").astype(str) + ")"
+df["movie_id"] = df["Title"].astype(str).str.strip() + " (" + df["year"].fillna("NA").astype(str) + ")"
+
 
 
 interactions = df.explode("actors")[["actors", "movie_id", "rating"]]
 interactions.columns = ["user", "item", "rating"]
+user_seen = (
+    interactions.groupby("user")["item"]
+    .apply(set)
+    .to_dict()
+)
+
 
 users = interactions["user"].unique()
 items = interactions["item"].unique()
@@ -97,63 +104,25 @@ for _ in range(10):
 def recommend_collab(actor, user_seen, top_n=10):
     actor = actor.strip()
 
-    if actor not in user_seen:
+    if actor not in user_to_idx:
         return []
 
-    seen = user_seen[actor]
-
-    rng = np.random.default_rng(SEED)
-    unseen = [m for m in movie_ids if m not in seen]
-
-    if not unseen:
-        return []
-
-    if len(unseen) > 2000:
-        candidates = rng.choice(unseen, size=2000, replace=False).tolist()
-    else:
-        candidates = unseen
-
-    scored = []
-    for item in candidates:
-        try:
-            score = svd.predict(actor, item).est
-        except:
-            score = 0.0
-        scored.append((item, score))
-
-    scored.sort(key=lambda x: x[1], reverse=True)
-    return scored[:top_n]
-
-
-    seen = user_seen[actor]
-
-    rng = np.random.default_rng(SEED)
-    unseen = [m for m in movie_ids if m not in seen]
-
-    if not unseen:
-        return []
-
-    if len(unseen) > 2000:
-        candidates = rng.choice(unseen, size=2000, replace=False).tolist()
-    else:
-        candidates = unseen
-
-    scored = []
-    for item in candidates:
-        try:
-            score = svd.predict(actor, item).est
-        except:
-            score = 0.0
-        scored.append((item, score))
-
-    scored.sort(key=lambda x: x[1], reverse=True)
-    return scored[:top_n]
-
-    u = user_map[actor]
+    u = user_to_idx[actor]
     scores = U[u] @ V.T
-    top = np.argsort(scores)[::-1][:n]
 
-    return [(items[i], float(scores[i])) for i in top]
+    ranked_items = np.argsort(scores)[::-1]
+
+    seen = user_seen.get(actor, set())
+    recommendations = []
+
+    for idx in ranked_items:
+        item = items[idx]
+        if item not in seen:
+            recommendations.append((item, float(scores[idx])))
+        if len(recommendations) >= top_n:
+            break
+
+    return recommendations
 
 
 def recommend_tfidf(movie, n=10):
@@ -196,13 +165,7 @@ mode = st.sidebar.radio(
 
 st.sidebar.divider()
 
-top_n = st.sidebar.slider(
-    "Number of Recommendations",
-    min_value=5,
-    max_value=20,
-    value=10,
-    step=1
-)
+\
 
 top_n = st.sidebar.slider("Top N", 5, 20, 10)
 
@@ -215,9 +178,16 @@ elif mode.startswith("🧠"):
     recs = recommend_embed(movie, top_n)
 
 else:
-    actor = st.selectbox("🎭 Select an Actor", sorted(users))
-    recs = recommend_collab(actor, top_n)
+    actor = st.selectbox("🎭 Select an Actor", sorted(user_seen.keys()))
+
+    recs = recommend_collab(actor, user_seen, top_n)
+
 
 
 st.subheader("Recommendations")
+if not recs:
+    st.warning("No recommendations found for this selection.")
+else:
+    st.dataframe(pd.DataFrame(recs, columns=["Movie", "Score"]))
+
 st.dataframe(pd.DataFrame(recs, columns=["Movie", "Score"]))
