@@ -94,9 +94,35 @@ for _ in range(10):
 # =============================
 # RECOMMENDATION FUNCTIONS
 # =============================
-def recommend_collab(actor, n=10):
-    if actor not in user_map:
+def recommend_collab(actor, top_n=10):
+    actor = actor.strip()
+
+    if actor not in user_seen:
         return []
+
+    seen = user_seen[actor]
+
+    rng = np.random.default_rng(SEED)
+    unseen = [m for m in movie_ids if m not in seen]
+
+    if not unseen:
+        return []
+
+    if len(unseen) > 2000:
+        candidates = rng.choice(unseen, size=2000, replace=False).tolist()
+    else:
+        candidates = unseen
+
+    scored = []
+    for item in candidates:
+        try:
+            score = svd.predict(actor, item).est
+        except:
+            score = 0.0
+        scored.append((item, score))
+
+    scored.sort(key=lambda x: x[1], reverse=True)
+    return scored[:top_n]
 
     u = user_map[actor]
     scores = U[u] @ V.T
