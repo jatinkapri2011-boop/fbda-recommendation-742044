@@ -1,10 +1,10 @@
 streamlit
 pandas
 numpy
-scipy
 scikit-learn
+scipy
 joblib
-pyarrow
-sentence-transformers
-faiss-cpu
 gdown
+faiss-cpu
+scikit-surprise
+pyarrow
