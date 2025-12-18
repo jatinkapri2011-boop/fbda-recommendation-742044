@@ -16,7 +16,7 @@ def download_from_drive(file_id, output):
         url = f"https://drive.google.com/uc?export=download&id={file_id}"
         gdown.download(url, output, quiet=False)
 
-with st.spinner("Downloading model files (first run only)..."):
+with st.spinner("Downloading model files (if first run)..."):
     download_from_drive("1kFkoX7hPQC9TvZWLprIQHFwJ4e8CcBqy", "meta_742044.parquet")
     download_from_drive("1PBUuC8N1XvaPnX8x9dbXy4iT_tNBSA1", "sampled_10001_742044.csv")
     download_from_drive("1yXZ0PeLB9dao-9bsmMSRUNnRc2sHfL7", "svd_model_742044.pkl")
@@ -24,7 +24,6 @@ with st.spinner("Downloading model files (first run only)..."):
     download_from_drive("1YZFmBBFCc3AxKsOpM5ECOC4tBT9GIRMY", "tfidf_matrix_742044.npz")
     download_from_drive("1a506s41J0qenzTSOHg5LVSS0XnL-Fpq", "embeddings_742044.npy")
     download_from_drive("17orGU6B1SMocR2y_Z_b_PKFK7Q_T5yfu", "faiss_index_742044.index")
-
 
 # =============================
 # CONFIG
@@ -151,7 +150,10 @@ def recommend_svd(actor_name, top_n=10, candidate_pool=2000):
 
     scored = []
     for item in candidates:
-        est = svd.predict(actor_name, item).est
+        try:
+            est = svd.predict(actor_name, item).est
+        except:
+            est = 0
         scored.append((item, float(est)))
 
     scored.sort(key=lambda x: x[1], reverse=True)
@@ -165,53 +167,3 @@ mode = st.sidebar.selectbox(
     [
         "Content-Based (TF-IDF + Cosine)",
         "Text Embeddings (MiniLM + FAISS)",
-        "Collaborative Filtering (Actors + SVD)"
-    ]
-)
-
-top_n = st.sidebar.slider("Top N Recommendations", 5, 20, 10)
-
-if mode.startswith("Content-Based"):
-    movie = st.selectbox("Select a movie", movie_ids)
-    recs = recommend_tfidf(movie, top_n)
-
-elif mode.startswith("Text Embeddings"):
-    movie = st.selectbox("Select a movie", movie_ids)
-    recs = recommend_embed(movie, top_n)
-
-else:
-    actor = st.selectbox("Select an actor", actors)
-    recs = recommend_svd(actor, top_n)
-
-# =============================
-# OUTPUT
-# =============================
-st.subheader("Recommended Movies")
-
-rows = []
-for mid, score in recs:
-    row_df = meta[meta["movie_id"] == mid]
-    if row_df.empty:
-        continue
-
-    r = row_df.iloc[0].to_dict()
-    r["score"] = score
-    rows.append(r)
-
-
-if not rows:
-    st.warning("No recommendations found.")
-else:
-    out_df = pd.DataFrame(rows)[
-        ["movie_id", "year", "genre", "rating", "votes", "score", "stars"]
-    ]
-    st.dataframe(out_df, use_container_width=True)
-
-    with st.expander("Show Descriptions"):
-        for row in rows:
-            st.markdown(
-                f"**{row['movie_id']}**  \n"
-                f"Score: `{row['score']:.4f}`  \n"
-                f"{row['description']}"
-            )
-            st.markdown("---")
