@@ -54,7 +54,8 @@ def parse_actors(s):
     return [a.strip() for a in re.split("[,|]", str(s)) if a.strip()]
 
 df["actors"] = df["stars"].apply(parse_actors)
-df["movie_id"] = df["Title"] + " (" + df["year"].fillna("NA").astype(str) + ")"
+df["movie_id"] = df["title"].astype(str).str.strip() + " (" + df["year"].fillna("NA").astype(str) + ")"
+
 
 interactions = df.explode("actors")[["actors", "movie_id", "rating"]]
 interactions.columns = ["user", "item", "rating"]
