@@ -26,13 +26,21 @@ FILES = {
 # =============================
 # DOWNLOAD FILES
 # =============================
-def download(file_id, name):
-    if not os.path.exists(name):
-        url = f"https://drive.google.com/uc?id={file_id}"
-        gdown.download(url, name, quiet=True)
+@st.cache_resource
+def download_all_files():
+    with st.status("📦 Preparing models (first run may take 1–2 minutes)...", expanded=True) as status:
+        for key, (fname, fid) in FILES.items():
+            if not os.path.exists(fname):
+                st.write(f"⬇️ Downloading `{fname}`")
+                url = f"https://drive.google.com/uc?id={fid}"
+                gdown.download(url, fname, quiet=True)
+            else:
+                st.write(f"✅ `{fname}` already available")
 
-for name, fid in FILES.values():
-    download(fid, name)
+        status.update(label="✅ All files ready", state="complete")
+
+download_all_files()
+
 
 # =============================
 # LOAD DATA
@@ -87,12 +95,15 @@ for _ in range(10):
 # RECOMMENDATION FUNCTIONS
 # =============================
 def recommend_collab(actor, n=10):
-    if actor not in user_to_idx:
+    if actor not in user_map:
         return []
-    u = user_to_idx[actor]
+
+    u = user_map[actor]
     scores = U[u] @ V.T
     top = np.argsort(scores)[::-1][:n]
-    return [(items[i], scores[i]) for i in top]
+
+    return [(items[i], float(scores[i])) for i in top]
+
 
 def recommend_tfidf(movie, n=10):
     i = movie_to_idx[movie]
@@ -111,6 +122,10 @@ def recommend_embed(movie, n=10):
 # =============================
 st.set_page_config("FBDA Recommender", layout="wide")
 st.title("🎬 Movie Recommendation System (Group 742044)")
+st.info(
+    "⏳ First load may take 1–2 minutes due to model initialization. "
+    "Subsequent usage will be fast thanks to caching."
+)
 
 mode = st.sidebar.selectbox(
     "Choose Recommendation Type",
