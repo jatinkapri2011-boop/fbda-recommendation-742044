@@ -191,12 +191,13 @@ st.subheader("Recommended Movies")
 rows = []
 for mid, score in recs:
     row_df = meta[meta["movie_id"] == mid]
-if row_df.empty:
-    continue
-r = row_df.iloc[0].to_dict()
+    if row_df.empty:
+        continue
 
+    r = row_df.iloc[0].to_dict()
     r["score"] = score
     rows.append(r)
+
 
 if not rows:
     st.warning("No recommendations found.")
