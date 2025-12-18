@@ -6,123 +6,129 @@ from scipy import sparse
 import faiss
 import gdown
 import os
+import re
 
 # =============================
-# GOOGLE DRIVE DOWNLOAD UTILITY
+# CONFIG
 # =============================
-def download(file_id, output):
-    if not os.path.exists(output):
+GROUP_ID = "742044"
+SEED = 742044
+np.random.seed(SEED)
+
+FILES = {
+    "meta": ("meta_742044.parquet", "1kfK0x7hPQC9TvZwLprlQHFwJ4e8CcBqy"),
+    "sample": ("sampled_10001_742044.csv", "1PBUEUc8N1XvaPnX8x9dbXy4iT_tNBSAl"),
+    "tfidf": ("tfidf_matrix_742044.npz", "1YZfmBFBCc3AxKsoPm5E0CQ4tBT9GIRMY"),
+    "embed": ("embeddings_742044.npy", "1a506s4IJqeunzTSQHg5LVSS0xnLl-Fpq"),
+    "faiss": ("faiss_index_742044.index", "17orGU6B1SMocR2y_Z_b_PKFK7O_TSyfu"),
+}
+
+# =============================
+# DOWNLOAD FILES
+# =============================
+def download(file_id, name):
+    if not os.path.exists(name):
         url = f"https://drive.google.com/uc?id={file_id}"
-        gdown.download(url, output, quiet=False, fuzzy=True)
+        gdown.download(url, name, quiet=True)
 
-with st.spinner("Downloading model files (first run only)..."):
-    download("1kfK0x7hPQC9TvZwLprlQHFwJ4e8CcBqy", "meta_742044.parquet")
-    download("1YZfmBFBCc3AxKsoPm5E0CQ4tBT9GIRMY", "tfidf_matrix_742044.npz")
-    download("1a506s4IJqeunzTSQHg5LVSS0xnLl-Fpq", "embeddings_742044.npy")
-    download("17orGU6B1SMocR2y_Z_b_PKFK7O_TSyfu", "faiss_index_742044.index")
+for name, fid in FILES.values():
+    download(fid, name)
 
 # =============================
-# PAGE CONFIG
+# LOAD DATA
 # =============================
-st.set_page_config(
-    page_title="FBDA Movie Recommendation System",
-    layout="wide"
-)
+meta = pd.read_parquet("meta_742044.parquet")
+tfidf_matrix = sparse.load_npz("tfidf_matrix_742044.npz")
+embeddings = np.load("embeddings_742044.npy").astype("float32")
+index = faiss.read_index("faiss_index_742044.index")
 
-st.title("🎬 FBDA Movie Recommendation System (Group 742044)")
-
-# =============================
-# LOAD DATA & MODELS
-# =============================
-@st.cache_data
-def load_meta():
-    return pd.read_parquet("meta_742044.parquet")
-
-@st.cache_resource
-def load_models():
-    tfidf_matrix = sparse.load_npz("tfidf_matrix_742044.npz")
-    embeddings = np.load("embeddings_742044.npy").astype("float32")
-    index = faiss.read_index("faiss_index_742044.index")
-    return tfidf_matrix, embeddings, index
-
-try:
-    meta = load_meta()
-    tfidf_matrix, embeddings, index = load_models()
-    st.success("Models loaded successfully ✅")
-except Exception as e:
-    st.error("Failed to load data or models ❌")
-    st.exception(e)
-    st.stop()
-
-# =============================
-# PREPARATION
-# =============================
 movie_ids = meta["movie_id"].tolist()
 movie_to_idx = {m: i for i, m in enumerate(movie_ids)}
 
 # =============================
+# BUILD COLLABORATIVE DATA
+# =============================
+df = pd.read_csv("sampled_10001_742044.csv")
+
+def parse_actors(s):
+    return [a.strip() for a in re.split("[,|]", str(s)) if a.strip()]
+
+df["actors"] = df["stars"].apply(parse_actors)
+df["movie_id"] = df["Title"] + " (" + df["year"].fillna("NA").astype(str) + ")"
+
+interactions = df.explode("actors")[["actors", "movie_id", "rating"]]
+interactions.columns = ["user", "item", "rating"]
+
+users = interactions["user"].unique()
+items = interactions["item"].unique()
+
+user_to_idx = {u: i for i, u in enumerate(users)}
+item_to_idx = {i: j for j, i in enumerate(items)}
+
+# =============================
+# MATRIX FACTORIZATION (NUMPY)
+# =============================
+K = 20
+U = np.random.normal(scale=0.1, size=(len(users), K))
+V = np.random.normal(scale=0.1, size=(len(items), K))
+
+for _ in range(10):
+    for _, row in interactions.iterrows():
+        u = user_to_idx[row["user"]]
+        i = item_to_idx[row["item"]]
+        r = row["rating"]
+        pred = U[u] @ V[i]
+        err = r - pred
+        U[u] += 0.01 * err * V[i]
+        V[i] += 0.01 * err * U[u]
+
+# =============================
 # RECOMMENDATION FUNCTIONS
 # =============================
-def recommend_tfidf(movie_id, top_n):
-    idx = movie_to_idx[movie_id]
-    scores = cosine_similarity(
-        tfidf_matrix[idx],
-        tfidf_matrix
-    ).flatten()
+def recommend_collab(actor, n=10):
+    if actor not in user_to_idx:
+        return []
+    u = user_to_idx[actor]
+    scores = U[u] @ V.T
+    top = np.argsort(scores)[::-1][:n]
+    return [(items[i], scores[i]) for i in top]
 
-    scores[idx] = -1
-    top_idx = scores.argsort()[::-1][:top_n]
-    return [(movie_ids[i], scores[i]) for i in top_idx]
+def recommend_tfidf(movie, n=10):
+    i = movie_to_idx[movie]
+    sims = cosine_similarity(tfidf_matrix[i], tfidf_matrix).flatten()
+    sims[i] = -1
+    top = sims.argsort()[::-1][:n]
+    return [(movie_ids[j], sims[j]) for j in top]
 
-def recommend_embeddings(movie_id, top_n):
-    idx = movie_to_idx[movie_id]
-    query = embeddings[idx:idx+1]
-
-    scores, indices = index.search(query, top_n + 1)
-
-    results = []
-    for score, i in zip(scores[0], indices[0]):
-        if i != idx:
-            results.append((movie_ids[i], float(score)))
-
-    return results[:top_n]
+def recommend_embed(movie, n=10):
+    i = movie_to_idx[movie]
+    D, I = index.search(embeddings[i:i+1], n+1)
+    return [(movie_ids[j], float(d)) for d, j in zip(D[0], I[0]) if j != i][:n]
 
 # =============================
-# UI
+# STREAMLIT UI
 # =============================
-method = st.sidebar.selectbox(
-    "Select Recommendation Method",
-    ["Content-Based (TF-IDF)", "Text Embeddings (FAISS)"]
+st.set_page_config("FBDA Recommender", layout="wide")
+st.title("🎬 Movie Recommendation System (Group 742044)")
+
+mode = st.sidebar.selectbox(
+    "Choose Recommendation Type",
+    ["Content-Based", "Embedding-Based", "Collaborative Filtering"]
 )
 
-top_n = st.sidebar.slider("Number of Recommendations", 5, 20, 10)
+top_n = st.sidebar.slider("Top N", 5, 20, 10)
 
-selected_movie = st.selectbox("Select a Movie", movie_ids)
+if mode == "Content-Based":
+    movie = st.selectbox("Select Movie", movie_ids)
+    recs = recommend_tfidf(movie, top_n)
 
-if method == "Content-Based (TF-IDF)":
-    recs = recommend_tfidf(selected_movie, top_n)
+elif mode == "Embedding-Based":
+    movie = st.selectbox("Select Movie", movie_ids)
+    recs = recommend_embed(movie, top_n)
+
 else:
-    recs = recommend_embeddings(selected_movie, top_n)
+    actor = st.selectbox("Select Actor", sorted(users))
+    recs = recommend_collab(actor, top_n)
 
-# =============================
-# DISPLAY RESULTS
-# =============================
-st.subheader("🎯 Recommended Movies")
-
-rows = []
-for movie, score in recs:
-    row = meta[meta["movie_id"] == movie].iloc[0].to_dict()
-    row["score"] = round(float(score), 4)
-    rows.append(row)
-
-df = pd.DataFrame(rows)[
-    ["movie_id", "year", "genre", "rating", "votes", "score"]
-]
-
-st.dataframe(df, use_container_width=True)
-
-with st.expander("📄 Movie Descriptions"):
-    for r in rows:
-        st.markdown(f"**{r['movie_id']}**")
-        st.write(r["description"])
-        st.markdown("---")
+st.subheader("Recommendations")
+st.dataframe(pd.DataFrame(recs, columns=["Movie", "Score"]))
