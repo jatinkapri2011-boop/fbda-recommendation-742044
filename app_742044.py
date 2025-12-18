@@ -42,8 +42,8 @@ def load_meta():
     return pd.read_parquet("meta_742044.parquet")
 
 @st.cache_resource
-def load_models()
-:
+def load_models():
+
     svd = joblib.load("svd_model_742044.pkl")
     tfidf = joblib.load("tfidf_vectorizer_742044.pkl")
     tfidf_matrix = sparse.load_npz("tfidf_matrix_742044.npz")
