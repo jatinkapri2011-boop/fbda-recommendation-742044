@@ -44,16 +44,18 @@ def load_meta():
 @st.cache_resource
 def load_models():
 
-    svd = joblib.load("svd_model_742044.pkl")
+    
     tfidf = joblib.load("tfidf_vectorizer_742044.pkl")
     tfidf_matrix = sparse.load_npz("tfidf_matrix_742044.npz")
     emb = np.load("embeddings_742044.npy").astype("float32")
     index = faiss.read_index("faiss_index_742044.index")
-    return svd, tfidf, tfidf_matrix, emb, index
+ return tfidf, tfidf_matrix, emb, index
+
 
 try:
     meta = load_meta()
-    svd, tfidf, tfidf_matrix, emb, index = load_models()
+    tfidf, tfidf_matrix, emb, index = load_models()
+
     st.success("Models and data loaded successfully ✅")
 except Exception as e:
     st.error("Failed to load models or data")
@@ -109,10 +111,6 @@ def recommend_embed(movie, top_n):
     scores, idxs = index.search(q, top_n + 1)
     return [(movie_ids[j], float(s)) for s, j in zip(scores[0], idxs[0]) if j != i][:top_n]
 
-def recommend_svd(actor, top_n):
-    unseen = [m for m in movie_ids if m not in user_seen.get(actor, set())]
-    scores = [(m, svd.predict(actor, m).est) for m in unseen[:2000]]
-    return sorted(scores, key=lambda x: x[1], reverse=True)[:top_n]
 
 # =============================
 # UI
@@ -121,10 +119,10 @@ mode = st.sidebar.selectbox(
     "Choose Recommendation Type",
     [
         "Content-Based (TF-IDF + Cosine)",
-        "Text Embeddings (MiniLM + FAISS)",
-        "Collaborative Filtering (Actors + SVD)"
+        "Text Embeddings (MiniLM + FAISS)"
     ]
 )
+
 
 top_n = st.sidebar.slider("Top N", 5, 20, 10)
 
