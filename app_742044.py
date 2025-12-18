@@ -1,3 +1,6 @@
+import streamlit as st
+st.title("FBDA Movie Recommendation System")
+st.write("App loaded successfully")
 import gdown
 import os
 
