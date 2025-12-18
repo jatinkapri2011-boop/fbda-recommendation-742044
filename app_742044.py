@@ -127,24 +127,46 @@ st.info(
     "Subsequent usage will be fast thanks to caching."
 )
 
-mode = st.sidebar.selectbox(
-    "Choose Recommendation Type",
-    ["Content-Based", "Embedding-Based", "Collaborative Filtering"]
+st.sidebar.markdown("## 🔍 Recommendation Engine")
+
+mode = st.sidebar.radio(
+    "Select Recommendation Model",
+    options=[
+        "📄 Content-Based (TF-IDF)",
+        "🧠 Text Embeddings (Semantic)",
+        "👥 Collaborative Filtering (Actors)"
+    ],
+    help="""
+    • Content-Based: Uses movie descriptions  
+    • Embeddings: Uses semantic similarity  
+    • Collaborative: Uses actor-movie interactions
+    """
+)
+
+st.sidebar.divider()
+
+top_n = st.sidebar.slider(
+    "Number of Recommendations",
+    min_value=5,
+    max_value=20,
+    value=10,
+    step=1
 )
 
 top_n = st.sidebar.slider("Top N", 5, 20, 10)
 
-if mode == "Content-Based":
-    movie = st.selectbox("Select Movie", movie_ids)
+if mode.startswith("📄"):
+    movie = st.selectbox("🎬 Select a Movie", movie_ids)
     recs = recommend_tfidf(movie, top_n)
 
-elif mode == "Embedding-Based":
-    movie = st.selectbox("Select Movie", movie_ids)
+elif mode.startswith("🧠"):
+    movie = st.selectbox("🎬 Select a Movie", movie_ids)
     recs = recommend_embed(movie, top_n)
 
 else:
-    actor = st.selectbox("Select Actor", sorted(users))
+    actor = st.selectbox("🎭 Select an Actor", sorted(users))
     recs = recommend_collab(actor, top_n)
+
 
 st.subheader("Recommendations")
 st.dataframe(pd.DataFrame(recs, columns=["Movie", "Score"]))
