@@ -167,3 +167,53 @@ mode = st.sidebar.selectbox(
     [
         "Content-Based (TF-IDF + Cosine)",
         "Text Embeddings (MiniLM + FAISS)",
+        "Collaborative Filtering (Actors + SVD)"
+    ]
+)
+top_n = st.sidebar.slider("Top N Recommendations", 5, 20, 10)
+
+if mode.startswith("Content-Based"):
+    movie = st.selectbox("Select a movie", movie_ids)
+    recs = recommend_tfidf(movie, top_n)
+
+elif mode.startswith("Text Embeddings"):
+    movie = st.selectbox("Select a movie", movie_ids)
+    recs = recommend_embed(movie, top_n)
+
+else:
+    actor = st.selectbox("Select an actor", actors)
+    recs = recommend_svd(actor, top_n)
+
+# =============================
+# OUTPUT
+# =============================
+st.subheader("Recommended Movies")
+
+rows = []
+for mid, score in recs:
+    row_df = meta[meta["movie_id"] == mid]
+    if row_df.empty:
+        continue
+
+    r = row_df.iloc[0].to_dict()
+    r["score"] = score
+    rows.append(r)
+
+if not rows:
+    st.warning("No recommendations found.")
+else:
+    out_df = pd.DataFrame(rows)[
+        ["movie_id", "year", "genre", "rating", "votes", "score", "stars"]
+    ]
+
+    st.dataframe(out_df, use_container_width=True)
+
+    with st.expander("Show Descriptions"):
+        for row in rows:
+            st.markdown(
+                f"**{row['movie_id']}**  \n"
+                f"Score: `{row['score']:.4f}`  \n"
+                f"{row['description']}"
+            )
+            st.markdown("---")
+
