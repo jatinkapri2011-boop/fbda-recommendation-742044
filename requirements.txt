@@ -3,7 +3,6 @@ pandas
 numpy
 scikit-learn
 scipy
-joblib
-gdown
 faiss-cpu
+gdown
 pyarrow
