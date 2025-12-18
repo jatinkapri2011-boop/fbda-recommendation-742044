@@ -5,6 +5,6 @@ scipy
 scikit-learn
 joblib
 pyarrow
-scikit-surprise
 sentence-transformers
 faiss-cpu
+gdown
