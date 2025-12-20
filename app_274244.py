@@ -16,7 +16,7 @@ SEED = 274244
 np.random.seed(SEED)
 
 FILES = {
-    "meta": ("meta_274244.parquet", "1kfK0x7hPQC9TvZwLprlQHFwJ4e8CcBqy"),
+    "meta": ("meta_274244.parquet", "1h1brxLMYv8u4yH-_U70Kxwprv_u0hjEy"),
     "sample": ("sampled_10001_274244.csv", "1PBUEUc8N1XvaPnX8x9dbXy4iT_tNBSAl"),
     "tfidf": ("tfidf_matrix_274244.npz", "1YZfmBFBCc3AxKsoPm5E0CQ4tBT9GIRMY"),
     "embed": ("embeddings_274244.npy", "1a506s4IJqeunzTSQHg5LVSS0xnLl-Fpq"),
@@ -24,152 +24,151 @@ FILES = {
 }
 
 # =============================
-# DOWNLOAD FILES (CACHED)
+# DOWNLOAD FILES
 # =============================
 @st.cache_resource
 def download_all_files():
-    for fname, fid in FILES.values():
-        if not os.path.exists(fname):
-            url = f"https://drive.google.com/uc?id={fid}"
-            gdown.download(url, fname, quiet=True)
-    return True
+    with st.status("📦 Preparing models (first run may take 1–2 minutes)...", expanded=True) as status:
+        for key, (fname, fid) in FILES.items():
+            if not os.path.exists(fname):
+                st.write(f"⬇️ Downloading `{fname}`")
+                url = f"https://drive.google.com/uc?id={fid}"
+                gdown.download(url, fname, quiet=True)
+            else:
+                st.write(f"✅ `{fname}` already available")
+
+        status.update(label="✅ All files ready", state="complete")
 
 download_all_files()
 
 # =============================
-# LOAD MODELS (CACHED)
+# LOAD DATA
 # =============================
-@st.cache_resource
-def load_models():
-    meta = pd.read_parquet(FILES["meta"][0])
-    tfidf_matrix = sparse.load_npz(FILES["tfidf"][0])
-    embeddings = np.load(FILES["embed"][0]).astype("float32")
-    faiss_index = faiss.read_index(FILES["faiss"][0])
-    return meta, tfidf_matrix, embeddings, faiss_index
-
-meta, tfidf_matrix, embeddings, index = load_models()
+meta = pd.read_parquet("meta_274244.parquet")
+tfidf_matrix = sparse.load_npz("tfidf_matrix_274244.npz")
+embeddings = np.load("embeddings_274244.npy").astype("float32")
+index = faiss.read_index("faiss_index_274244.index")
 
 movie_ids = meta["movie_id"].tolist()
 movie_to_idx = {m: i for i, m in enumerate(movie_ids)}
 
+# =============================
+# BUILD COLLABORATIVE DATA
+# =============================
+df = pd.read_csv("sampled_10001_274244.csv")
+
+def parse_actors(s):
+    return [a.strip() for a in re.split("[,|]", str(s)) if a.strip()]
+
+df["actors"] = df["stars"].apply(parse_actors)
+
+df["movie_id"] = (
+    df["title"].astype(str).str.strip()
+    + " ("
+    + df["year"].fillna("NA").astype(str)
+    + ")"
+)
+
+inter = df.explode("actors")[["actors", "movie_id", "rating"]]
+inter.columns = ["user", "item", "rating"]
+
+user_seen = (
+    inter.groupby("user")["item"]
+    .apply(set)
+    .to_dict()
+)
+
+users = inter["user"].unique()
+items = inter["item"].unique()
+
+user_to_idx = {u: i for i, u in enumerate(users)}
+item_to_idx = {it: j for j, it in enumerate(items)}
 
 # =============================
-# LOAD & PREPARE COLLAB (FAST, CACHED)
+# MATRIX FACTORIZATION (FAST)
 # =============================
-@st.cache_resource
-def load_collab():
-    df = pd.read_csv(FILES["sample"][0])
+K = 20
+U = np.random.normal(scale=0.1, size=(len(users), K))
+V = np.random.normal(scale=0.1, size=(len(items), K))
 
-    def parse_actors(s):
-        return [a.strip() for a in re.split("[,|]", str(s)) if a.strip()]
-
-    df["actors"] = df["stars"].apply(parse_actors)
-  # Detect correct title column
-title_col = None
-for c in ["title", "Title", "movie_title", "name"]:
-    if c in df.columns:
-        title_col = c
-        break
-
-if title_col is None:
-    raise KeyError("❌ Could not find a movie title column in CSV file")
-
-# Build movie_id
-df["movie_id"] = df[title_col].astype(str).str.strip() + " (" + df["year"].fillna("NA").astype(str) + ")"
-
-    inter = df.explode("actors")[["actors", "movie_id"]]
-    inter.columns = ["user", "item"]
-
-    user_seen = inter.groupby("user")["item"].apply(set).to_dict()
-
-    # Build an item popularity dictionary to sort recommendations
-    popularity = df.groupby("movie_id")["rating"].mean().to_dict()
-
-    return user_seen, popularity
-
-
-user_seen, popularity = load_collab()
-
+# Light training (10 iterations)
+for _ in range(10):
+    for _, row in inter.iterrows():
+        u = user_to_idx[row["user"]]
+        i = item_to_idx[row["item"]]
+        r = row["rating"]
+        pred = U[u] @ V[i]
+        err = r - pred
+        U[u] += 0.01 * err * V[i]
+        V[i] += 0.01 * err * U[u]
 
 # =============================
 # RECOMMENDATION FUNCTIONS
 # =============================
-def recommend_tfidf(movie, n):
+def recommend_collab(actor, top_n=10):
+    if actor not in user_to_idx:
+        return []
+
+    u = user_to_idx[actor]
+    scores = U[u] @ V.T
+    ranked = np.argsort(scores)[::-1]
+
+    seen = user_seen.get(actor, set())
+    out = []
+
+    for idx in ranked:
+        movie = items[idx]
+        if movie not in seen:
+            out.append((movie, float(scores[idx])))
+        if len(out) >= top_n:
+            break
+
+    return out
+
+def recommend_tfidf(movie, n=10):
     i = movie_to_idx[movie]
     sims = cosine_similarity(tfidf_matrix[i], tfidf_matrix).flatten()
     sims[i] = -1
     top = sims.argsort()[::-1][:n]
     return [(movie_ids[j], float(sims[j])) for j in top]
 
-
-def recommend_embed(movie, n):
+def recommend_embed(movie, n=10):
     i = movie_to_idx[movie]
-    D, I = index.search(embeddings[i:i+1], n + 1)
-    out = []
-    for d, j in zip(D[0], I[0]):
-        if j != i:
-            out.append((movie_ids[j], float(d)))
-        if len(out) == n:
-            break
-    return out
-
-
-def recommend_collab(actor, n):
-    if actor not in user_seen:
-        return []
-
-    seen = user_seen[actor]
-    candidates = [m for m in movie_ids if m not in seen]
-
-    # Rank by movie popularity (FAST)
-    ranked = sorted(
-        [(m, popularity.get(m, 0)) for m in candidates],
-        key=lambda x: x[1],
-        reverse=True
-    )
-    return ranked[:n]
-
+    D, I = index.search(embeddings[i:i+1], n+1)
+    return [(movie_ids[j], float(d)) for d, j in zip(D[0], I[0]) if j != i][:n]
 
 # =============================
-# UI
+# STREAMLIT UI
 # =============================
 st.set_page_config("FBDA Recommender", layout="wide")
 st.title("🎬 Movie Recommendation System (Group 274244)")
+st.info("⏳ First load may take 1–2 minutes due to model initialization.")
 
-st.sidebar.markdown("## 🔍 Select Recommendation Engine")
+st.sidebar.markdown("## 🔍 Recommendation Engine")
 
 mode = st.sidebar.radio(
-    "Recommendation Type",
+    "Select Recommendation Model",
     [
         "📄 Content-Based (TF-IDF)",
-        "🧠 Semantic Embeddings",
+        "🧠 Text Embeddings (Semantic)",
         "👥 Collaborative Filtering (Actors)"
     ]
 )
 
-top_n = st.sidebar.slider("Top N Recommendations", 5, 20, 10)
+top_n = st.sidebar.slider("Number of Recommendations", 5, 20, 10)
 
-
-# =============================
-# MAIN LOGIC
-# =============================
+# --- UI Logic ---
 if mode.startswith("📄"):
-    movie = st.selectbox("🎬 Choose a Movie", movie_ids)
+    movie = st.selectbox("🎬 Select a Movie", movie_ids)
     recs = recommend_tfidf(movie, top_n)
 
 elif mode.startswith("🧠"):
-    movie = st.selectbox("🎬 Choose a Movie", movie_ids)
+    movie = st.selectbox("🎬 Select a Movie", movie_ids)
     recs = recommend_embed(movie, top_n)
 
 else:
-    actor = st.selectbox("🎭 Choose an Actor", sorted(user_seen.keys()))
+    actor = st.selectbox("🎭 Select Actor", sorted(users))
     recs = recommend_collab(actor, top_n)
 
-
-# =============================
-# OUTPUT
-# =============================
-st.subheader("⭐ Recommendations")
-
-df_out = pd.DataFrame(recs, columns=["Movie", "Score"])
-st.dataframe(df_out, use_container_width=True)
+st.subheader("Recommendations")
+st.dataframe(pd.DataFrame(recs, columns=["Movie", "Score"]))
