@@ -1,8 +1,8 @@
 streamlit
 pandas
 numpy
-scikit-learn
 scipy
+scikit-learn
 faiss-cpu
 gdown
 pyarrow
