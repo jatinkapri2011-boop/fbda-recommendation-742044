@@ -64,7 +64,18 @@ def load_collab():
         return [a.strip() for a in re.split("[,|]", str(s)) if a.strip()]
 
     df["actors"] = df["stars"].apply(parse_actors)
-    df["movie_id"] = df["Title"].astype(str) + " (" + df["year"].fillna("NA").astype(str) + ")"
+  # Detect correct title column
+title_col = None
+for c in ["title", "Title", "movie_title", "name"]:
+    if c in df.columns:
+        title_col = c
+        break
+
+if title_col is None:
+    raise KeyError("❌ Could not find a movie title column in CSV file")
+
+# Build movie_id
+df["movie_id"] = df[title_col].astype(str).str.strip() + " (" + df["year"].fillna("NA").astype(str) + ")"
 
     inter = df.explode("actors")[["actors", "movie_id"]]
     inter.columns = ["user", "item"]
