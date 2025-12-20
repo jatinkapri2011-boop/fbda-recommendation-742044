@@ -11,16 +11,16 @@ import re
 # =============================
 # CONFIG
 # =============================
-GROUP_ID = "742044"
-SEED = 742044
+GROUP_ID = "274244"
+SEED = 274244
 np.random.seed(SEED)
 
 FILES = {
-    "meta": ("meta_742044.parquet", "1kfK0x7hPQC9TvZwLprlQHFwJ4e8CcBqy"),
-    "sample": ("sampled_10001_742044.csv", "1PBUEUc8N1XvaPnX8x9dbXy4iT_tNBSAl"),
-    "tfidf": ("tfidf_matrix_742044.npz", "1YZfmBFBCc3AxKsoPm5E0CQ4tBT9GIRMY"),
-    "embed": ("embeddings_742044.npy", "1a506s4IJqeunzTSQHg5LVSS0xnLl-Fpq"),
-    "faiss": ("faiss_index_742044.index", "17orGU6B1SMocR2y_Z_b_PKFK7O_TSyfu"),
+    "meta": ("meta_274244.parquet", "1kfK0x7hPQC9TvZwLprlQHFwJ4e8CcBqy"),
+    "sample": ("sampled_10001_274244.csv", "1PBUEUc8N1XvaPnX8x9dbXy4iT_tNBSAl"),
+    "tfidf": ("tfidf_matrix_274244.npz", "1YZfmBFBCc3AxKsoPm5E0CQ4tBT9GIRMY"),
+    "embed": ("embeddings_274244.npy", "1a506s4IJqeunzTSQHg5LVSS0xnLl-Fpq"),
+    "faiss": ("faiss_index_274244.index", "17orGU6B1SMocR2y_Z_b_PKFK7O_TSyfu")
 }
 
 # =============================
@@ -31,32 +31,31 @@ def download_all_files():
     with st.status("📦 Preparing models (first run may take 1–2 minutes)...", expanded=True) as status:
         for key, (fname, fid) in FILES.items():
             if not os.path.exists(fname):
-                st.write(f"⬇️ Downloading `{fname}`")
+                st.write(f"⬇️ Downloading `{fname}`...")
                 url = f"https://drive.google.com/uc?id={fid}"
-                gdown.download(url, fname, quiet=True)
+                gdown.download(url, fname, quiet=False)
             else:
-                st.write(f"✅ `{fname}` already available")
+                st.write(f"✅ `{fname}` already present")
 
         status.update(label="✅ All files ready", state="complete")
 
 download_all_files()
 
-
 # =============================
 # LOAD DATA
 # =============================
-meta = pd.read_parquet("meta_742044.parquet")
-tfidf_matrix = sparse.load_npz("tfidf_matrix_742044.npz")
-embeddings = np.load("embeddings_742044.npy").astype("float32")
-index = faiss.read_index("faiss_index_742044.index")
+meta = pd.read_parquet("meta_274244.parquet")
+tfidf_matrix = sparse.load_npz("tfidf_matrix_274244.npz")
+embeddings = np.load("embeddings_274244.npy").astype("float32")
+index = faiss.read_index("faiss_index_274244.index")
 
 movie_ids = meta["movie_id"].tolist()
 movie_to_idx = {m: i for i, m in enumerate(movie_ids)}
 
 # =============================
-# BUILD COLLABORATIVE DATA
+# COLLABORATIVE FILTERING DATA
 # =============================
-df = pd.read_csv("sampled_10001_742044.csv")
+df = pd.read_csv("sampled_10001_274244.csv")
 
 def parse_actors(s):
     return [a.strip() for a in re.split("[,|]", str(s)) if a.strip()]
@@ -64,26 +63,23 @@ def parse_actors(s):
 df["actors"] = df["stars"].apply(parse_actors)
 df["movie_id"] = df["title"].astype(str).str.strip() + " (" + df["year"].fillna("NA").astype(str) + ")"
 
-
-
-
 interactions = df.explode("actors")[["actors", "movie_id", "rating"]]
 interactions.columns = ["user", "item", "rating"]
+
+users = interactions["user"].unique()
+items = interactions["item"].unique()
+
 user_seen = (
     interactions.groupby("user")["item"]
     .apply(set)
     .to_dict()
 )
 
-
-users = interactions["user"].unique()
-items = interactions["item"].unique()
-
 user_to_idx = {u: i for i, u in enumerate(users)}
 item_to_idx = {i: j for j, i in enumerate(items)}
 
 # =============================
-# MATRIX FACTORIZATION (NUMPY)
+# MATRIX FACTORIZATION
 # =============================
 K = 20
 U = np.random.normal(scale=0.1, size=(len(users), K))
@@ -102,20 +98,19 @@ for _ in range(10):
 # =============================
 # RECOMMENDATION FUNCTIONS
 # =============================
-def recommend_collab(actor, user_seen, top_n=10):
+def recommend_collab(actor, top_n=10):
     actor = actor.strip()
 
     if actor not in user_to_idx:
         return []
 
     u = user_to_idx[actor]
-    scores = U[u] @ V.T
+    seen = user_seen.get(actor, set())
 
+    scores = U[u] @ V.T
     ranked_items = np.argsort(scores)[::-1]
 
-    seen = user_seen.get(actor, set())
     recommendations = []
-
     for idx in ranked_items:
         item = items[idx]
         if item not in seen:
@@ -131,44 +126,34 @@ def recommend_tfidf(movie, n=10):
     sims = cosine_similarity(tfidf_matrix[i], tfidf_matrix).flatten()
     sims[i] = -1
     top = sims.argsort()[::-1][:n]
-    return [(movie_ids[j], sims[j]) for j in top]
+    return [(movie_ids[j], float(sims[j])) for j in top]
+
 
 def recommend_embed(movie, n=10):
     i = movie_to_idx[movie]
     D, I = index.search(embeddings[i:i+1], n+1)
     return [(movie_ids[j], float(d)) for d, j in zip(D[0], I[0]) if j != i][:n]
 
+
 # =============================
 # STREAMLIT UI
 # =============================
-st.set_page_config("FBDA Recommender", layout="wide")
-st.title("🎬 Movie Recommendation System (Group 742044)")
-st.info(
-    "⏳ First load may take 1–2 minutes due to model initialization. "
-    "Subsequent usage will be fast thanks to caching."
-)
+st.set_page_config("Movie Recommender", layout="wide")
+st.title(f"🎬 Movie Recommendation System (Group {GROUP_ID})")
 
-st.sidebar.markdown("## 🔍 Recommendation Engine")
+st.sidebar.header("🔍 Recommendation Engine")
 
 mode = st.sidebar.radio(
     "Select Recommendation Model",
-    options=[
+    [
         "📄 Content-Based (TF-IDF)",
         "🧠 Text Embeddings (Semantic)",
         "👥 Collaborative Filtering (Actors)"
-    ],
-    help="""
-    • Content-Based: Uses movie descriptions  
-    • Embeddings: Uses semantic similarity  
-    • Collaborative: Uses actor-movie interactions
-    """
+    ]
 )
 
-st.sidebar.divider()
+top_n = st.sidebar.slider("Top N Recommendations", 5, 20, 10)
 
-\
-
-top_n = st.sidebar.slider("Top N", 5, 20, 10)
 
 if mode.startswith("📄"):
     movie = st.selectbox("🎬 Select a Movie", movie_ids)
@@ -179,16 +164,9 @@ elif mode.startswith("🧠"):
     recs = recommend_embed(movie, top_n)
 
 else:
-    actor = st.selectbox("🎭 Select an Actor", sorted(user_seen.keys()))
-
-    recs = recommend_collab(actor, user_seen, top_n)
-
+    actor = st.selectbox("🎭 Select an Actor", sorted(users))
+    recs = recommend_collab(actor, top_n)
 
 
-st.subheader("Recommendations")
-if not recs:
-    st.warning("No recommendations found for this selection.")
-else:
-    st.dataframe(pd.DataFrame(recs, columns=["Movie", "Score"]))
-
+st.subheader("Recommended Movies")
 st.dataframe(pd.DataFrame(recs, columns=["Movie", "Score"]))
