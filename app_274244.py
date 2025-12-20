@@ -215,13 +215,19 @@ try:
         if st.button("Recommend", type="primary"):
             recs = recommend_collab(actor, top_n)
 
-    # Display Results
+   
+   # Display Results
     st.divider()
     if recs:
         st.subheader("Top Recommendations")
         df_recs = pd.DataFrame(recs, columns=["Movie Title", "Similarity Score"])
+        
+        # Use Streamlit's native column configuration for formatting
         st.dataframe(
-            df_recs.style.format({"Similarity Score": "{:.4f}"}).background_gradient(cmap="Blues"),
+            df_recs,
+            column_config={
+                "Similarity Score": st.column_config.NumberColumn(format="%.4f")
+            },
             use_container_width=True,
             hide_index=True
         )
